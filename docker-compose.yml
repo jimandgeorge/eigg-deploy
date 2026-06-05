@@ -61,7 +61,9 @@ services:
 
   # ── EIGG Investigate ─────────────────────────────────────────────────────────
   invest_backend:
-    build: ../fraud-copilot/backend
+    build:
+      context: ../fraud-copilot
+      dockerfile: backend/Dockerfile
     environment:
       ENVIRONMENT: production
       SECRET_KEY: ${INVEST_SECRET_KEY}
