@@ -71,6 +71,12 @@ services:
       LLM_PROVIDER: ${INVEST_LLM_PROVIDER:-anthropic}
       ANTHROPIC_API_KEY: ${INVEST_ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: https://investigate.eigg.io
+      APP_BASE_URL: https://investigate.eigg.io
+      INTERNAL_API_SECRET: ${INVEST_INTERNAL_SECRET}
+      ADMIN_EMAIL: ${INVEST_ADMIN_EMAIL:-admin@eigg.io}
+      ADMIN_PASSWORD: ${INVEST_ADMIN_PASSWORD}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: EIGG <noreply@eigg.io>
     restart: unless-stopped
 
   invest_frontend:
@@ -83,6 +89,7 @@ services:
       NEXTAUTH_URL: https://investigate.eigg.io
       NEXTAUTH_SECRET: ${INVEST_NEXTAUTH_SECRET}
       API_URL: http://invest_backend:8000
+      INTERNAL_API_SECRET: ${INVEST_INTERNAL_SECRET}
       AUTH_PASSWORD: ${INVEST_AUTH_PASSWORD:-}
     depends_on:
       - invest_backend
