@@ -1,0 +1,109 @@
+# EIGG — single-droplet deployment of both products behind one edge nginx.
+#   prevent.eigg.io      -> EIGG Prevent   (../eigg-prevent)   + bundled Postgres
+#   investigate.eigg.io  -> EIGG Investigate (../fraud-copilot) + Neon (external)
+#
+# All three repos are cloned side by side on the droplet:
+#   ~/eigg-deploy  ~/eigg-prevent  ~/fraud-copilot
+# Copy .env.example -> .env and fill it in. Then:  docker compose up -d --build
+services:
+  # ── EIGG Prevent ────────────────────────────────────────────────────────────
+  prevent_db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: eigg
+      POSTGRES_PASSWORD: ${PREVENT_DB_PASSWORD}
+      POSTGRES_DB: eigg_prevent
+    volumes:
+      - prevent_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eigg -d eigg_prevent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  prevent_backend:
+    build: ../eigg-prevent/backend
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://eigg:${PREVENT_DB_PASSWORD}@prevent_db:5432/eigg_prevent
+      DB_SSL: "false"
+      APP_BASE_URL: https://prevent.eigg.io
+      CORS_ORIGINS: https://prevent.eigg.io
+      INTERNAL_API_SECRET: ${PREVENT_INTERNAL_SECRET}
+      ADMIN_EMAIL: ${PREVENT_ADMIN_EMAIL:-admin@eigg.io}
+      ADMIN_PASSWORD: ${PREVENT_ADMIN_PASSWORD}
+      LLM_PROVIDER: ${PREVENT_LLM_PROVIDER:-mock}
+      ANTHROPIC_API_KEY: ${PREVENT_ANTHROPIC_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: EIGG <noreply@eigg.io>
+    depends_on:
+      prevent_db:
+        condition: service_healthy
+    volumes:
+      - prevent_uploads:/app/uploads
+    restart: unless-stopped
+
+  prevent_frontend:
+    build:
+      context: ../eigg-prevent/frontend
+      args:
+        NEXT_PUBLIC_API_URL: ""   # same-origin: /api/v1 via the edge
+    environment:
+      NEXTAUTH_URL: https://prevent.eigg.io
+      NEXTAUTH_SECRET: ${PREVENT_NEXTAUTH_SECRET}
+      API_URL: http://prevent_backend:8001
+      INTERNAL_API_SECRET: ${PREVENT_INTERNAL_SECRET}
+      AUTH_PASSWORD: ${PREVENT_AUTH_PASSWORD:-}
+    depends_on:
+      - prevent_backend
+    restart: unless-stopped
+
+  # ── EIGG Investigate ─────────────────────────────────────────────────────────
+  invest_backend:
+    build: ../fraud-copilot/backend
+    environment:
+      ENVIRONMENT: production
+      SECRET_KEY: ${INVEST_SECRET_KEY}
+      DATABASE_URL: ${INVEST_DATABASE_URL}        # Neon connection string
+      LLM_PROVIDER: ${INVEST_LLM_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${INVEST_ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: https://investigate.eigg.io
+    restart: unless-stopped
+
+  invest_frontend:
+    build:
+      context: ../fraud-copilot/frontend
+      args:
+        NEXT_PUBLIC_API_URL: ""   # same-origin: /api/v1 via the edge
+    environment:
+      NODE_ENV: production
+      NEXTAUTH_URL: https://investigate.eigg.io
+      NEXTAUTH_SECRET: ${INVEST_NEXTAUTH_SECRET}
+      API_URL: http://invest_backend:8000
+      AUTH_PASSWORD: ${INVEST_AUTH_PASSWORD:-}
+    depends_on:
+      - invest_backend
+    restart: unless-stopped
+
+  # ── Shared edge (TLS via Cloudflare Origin Certificate) ──────────────────────
+  edge:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/edge.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/cloudflare-realip.conf:/etc/nginx/conf.d/cloudflare-realip.conf:ro
+      - ./nginx/_proxy.inc:/etc/nginx/conf.d/_proxy.inc:ro
+      - /etc/cloudflare:/etc/cloudflare:ro
+    depends_on:
+      - prevent_frontend
+      - prevent_backend
+      - invest_frontend
+      - invest_backend
+    restart: unless-stopped
+
+volumes:
+  prevent_pgdata:
+  prevent_uploads:

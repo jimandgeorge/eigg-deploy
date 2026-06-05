@@ -1,0 +1,5 @@
+.env
+*.local
+# Never commit certs/keys
+*.pem
+*.key
